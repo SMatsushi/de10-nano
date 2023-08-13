@@ -31,3 +31,5 @@ alias h=history
 alias j=jobs
 alias vi=vim
 alias more=less
+
+export PATH=$PATH:/usr/local/bin:.
