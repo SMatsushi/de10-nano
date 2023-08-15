@@ -46,7 +46,8 @@ extern "C"
 //
 //
 #define soc_cv_av
-#define LINUX_TASK_MODE
+// #define LINUX_TASK_MODE
+#undef LINUX_TASK_MODE
 	
 	
 #ifdef LINUX_TASK_MODE 
