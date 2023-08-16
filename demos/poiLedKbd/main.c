@@ -62,11 +62,12 @@ unsigned short maddr;		// memory address register
 unsigned short mdata;		// memory data register
 unsigned char   mden;		// mden bit i turns on mdata digit i
 unsigned char	 cmd;		// 0:Ret, ... 4:AdrSet, 5: RdIncr, 6:RdDecr, 7:WrIncr
+int				reset = 0;	// 1 if reset button is pushed
 
-unsigned char seg_tbl = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7c, 0x07,
-                         // 0,    1,    2,    3,    4,    5,    6,    7, 
-						 0x7f, 0x67, 0x77, 0x7c, 0x58, 0x5e, 0x79, 0x71, 0x80};	// segments for 0, ... 9, DP
-                         // 8,    9,    A,    b,    c,    d,    e,    f, 
+unsigned char seg_tbl[20] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7c, 0x07,
+                             // 0,    1,    2,    3,    4,    5,    6,    7, 
+                             0x7f, 0x67, 0x77, 0x7c, 0x58, 0x5e, 0x79, 0x71, 0x80};	// segments for 0, ... 9, DP
+                             // 8,    9,    A,    b,    c,    d,    e,    f,   DP
 
 void set_ledseg(int data, int ena, int upper) {
 	// set four led segment refering 16 bit data and 4bit ena, if upper=1 set upper 4 digits 
@@ -85,7 +86,7 @@ void set_ledseg(int data, int ena, int upper) {
 	}
 }
 
-void rd_mem(maddr) {
+void rd_mem(int maddr) {
 	unsigned char md;
 	md = mem[maddr];
 	set_ledseg(maddr, 0xf, 1);
@@ -118,8 +119,10 @@ void exec_cmd(int cmd) {
 int main(int argc, char **argv) {
 	int fd;
 	uint32_t  scan_input;
-	int	sel, key_on, key_prev;
-	int key_val, rst;	// register saving key scan result
+	int	sel;
+	int key_on, key_prev;	// for chattering cancel
+	int key_stb, key_stbp; // stabilized key input, and key push edge
+	int key_val;	// register saving key scan result
 	int i;
 
 	// map the address space for the LED registers into user space so we can interact with them.
@@ -148,7 +151,8 @@ int main(int argc, char **argv) {
 			set_sel(sel);
 			led_disp(sel);
 			scan_input = alt_read_word( (virtual_base + ((uint32_t)( ALT_GPIO0_EXT_PORTA_ADDR ) & (uint32_t)( HW_REGS_MASK ))) );		
-			if (i = (scan_input & (RSTIN_MASK|KEYIN_MASK))) {
+			i = scan_input & ( RSTIN_MASK | KEYIN_MASK );
+			if (i) {
 				key_on++;
 				key_val = (sel << 4) | i;	// [7:4, 3:0] = [sel, scan_input]
 			}
@@ -156,21 +160,25 @@ int main(int argc, char **argv) {
 		}
 		// Check if key is pressed. 
 		if (key_prev == key_on) {	// key is stabilized - chattering cancel if current key_on is the same as 16 ms ago.
-			if (key_on) { // Key pressed
-				// Analyze key and execute command
-				i = (key_val >> 4) & 7;
-				if (key_val & RSTIN_MASK) {
-					rst = 1;
-				} else if (key_val & CMDIN_MASK) {
-					exec_cmd(i);
-					// reset mdata, mden for next number imput
-					mdata = mden = 0;
-				} else {
-					i += (key_val & UPN_MASK) ? 8 : 0;	// get tenkey value
-					mdata = (mdata << 4) | i;
-					mden = (mden << 1) | 1;
-					set_ledseg(mdata, mden, 0);		// lower 4 digits
-				}
+			if (key_val & RSTIN_MASK) {
+				reset = 1;
+			} else {
+				reset = 0;		// negate reset signal
+				key_stb = key_on;
+				if (!key_stbp && key_stb) { // Key press edge
+					// Analyze key and execute command
+					i = (key_val >> 4) & 7;
+					} else if (key_val & CMDIN_MASK) {
+						exec_cmd(i);
+						// reset mdata, mden for next number imput
+						mdata = mden = 0;
+					} else {
+						i += (key_val & UPN_MASK) ? 8 : 0;	// get tenkey value
+						mdata = (mdata << 4) | i;
+						mden = (mden << 1) | 1;
+						set_ledseg(mdata, mden, 0);		// lower 4 digits
+					}
+				key_stbp = key_stb;
 			}
 		}
 		key_prev = key_on;
