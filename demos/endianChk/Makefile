@@ -1,5 +1,6 @@
 #
 TARGET = endichk
+TARGET_L = endichk_long
 
 #
 ALT_DEVICE_FAMILY ?= soc_cv_av
@@ -20,7 +21,7 @@ LD = gcc
 ARCH = arm
 
 .PHONY: build
-build: $(TARGET)
+build: $(TARGET) $(TARGET_L)
 
 $(TARGET): $(TARGET).o
 	$(LD) $(LDFLAGS)   $^ -o $@
@@ -28,9 +29,12 @@ $(TARGET): $(TARGET).o
 %.o : %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-.PHONY: run
+.PHONY: run run_long
 run:
 	./$(TARGET)
+
+run_long:
+	./$(TARGET_L)
 
 .PHONY: clean
 clean:
