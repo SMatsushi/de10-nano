@@ -31,16 +31,16 @@
 
 void *virtual_base;
 void set_sel(int sel) {
-	unsigned int setbits, clrbits;
+	unsigned long setbits, clrbits;
 	// set sel for segment/key scan selection
 	if (sel == 9) {
 		clrbits = SEL_UD;
 	} else if (sel == 8) {
 		clrbits = SEL_LD;
 	} else {
-		clrbits = SEL_138_EN | ((7 ^ sel) << 24);
+		clrbits = SEL_138_EN | ((7 & (7 ^ sel)) << 24);		// mask & (1's compliments)
 	}
-	setbits = SEL_MASK ^ clrbits;
+	setbits = SEL_MASK & (SEL_MASK ^ clrbits);
 	alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO1_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), setbits);
 	alt_clrbits_word( (virtual_base + ((uint32_t)( ALT_GPIO1_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), clrbits);
 }
@@ -49,7 +49,7 @@ unsigned char led_seg[10];	// led_seg[10-6] = digit Upper[DP,3,2,1,0]	: segment 
 void led_disp(int sel) {
 	// display LED segments at sel - 0 out to lit the segments: [D15,D14,..., D8] = [DP,G,...,(A/D1)]
 	int segments;
-	unsigned int setbits, clrbits;
+	unsigned long setbits, clrbits;
 	segments = led_seg[sel] & 0xff;
 	clrbits = segments << 8;
 	setbits = (0xff ^ segments) << 8;
@@ -144,8 +144,8 @@ int main(int argc, char **argv) {
 	printf("Setting GPIO diretion...\n");
 	alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DDR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), USER_IO_DIR );
 
-	printf("Scan key and LEDs\n");
-	key_prev = 0;	
+	printf("Scanning key and LEDs\n");
+	key_prev = key_on = 0;	
 	while (1) {
 		for(sel = key_on = 0; sel < MAX_SEL; sel++) {
 			set_sel(sel);
@@ -153,19 +153,24 @@ int main(int argc, char **argv) {
 			scan_input = alt_read_word( (virtual_base + ((uint32_t)( ALT_GPIO0_EXT_PORTA_ADDR ) & (uint32_t)( HW_REGS_MASK ))) );		
 			i = scan_input & ( RSTIN_MASK | KEYIN_MASK );
 			if (i) {
-				key_on++;
+				key_on = 1;
 				key_val = (sel << 4) | i;	// [7:4, 3:0] = [sel, scan_input]
+			} else {
+				key_on = 0;
 			}
 			usleep(DIG_WAIT_US);	
 		}
 		// Check if key is pressed. 
 		if (key_prev == key_on) {	// key is stabilized - chattering cancel if current key_on is the same as 16 ms ago.
+			key_stb = key_on;
 			if (key_val & RSTIN_MASK) {
-				reset = 1;
+				reset = 1;	// keep this signal while reset is pressed
+				if (!key_stbp) {
+					printf("Reset pressed!\n");
+				}
 			} else {
 				reset = 0;		// negate reset signal
-				key_stb = key_on;
-				if (!key_stbp && key_stb) { // Key press edge
+				if (!key_stbp && key_stb) { // Detect key pressing edge
 					// Analyze key and execute command
 					i = (key_val >> 4) & 7;
 					} else if (key_val & CMDIN_MASK) {
