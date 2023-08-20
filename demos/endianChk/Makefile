@@ -38,4 +38,4 @@ run_long:
 
 .PHONY: clean
 clean:
-	rm -f $(TARGET) *.a *.o *~
+	rm -f $(TARGET) $(TARGET_L) *.a *.o *~

@@ -30,32 +30,40 @@
 #define MAX_SEL		10		// scans select from 0 to MAX_SEL
 #define DIG_WAIT_US	1000	// wait us between segment/key scan
 
+void p_alt_setbits_word(void *va, uint32_t bits) {
+	printf("Addr 0x%08x: setting  0x%08x\n", (uint32_t)va, bits);
+	alt_setbits_word(va, bits);
+}
+
+void p_alt_clrbits_word(void *va, uint32_t bits) {
+	printf("Addr 0x%08x: clearing 0x%08x\n", (uint32_t)va, bits);
+	alt_clrbits_word(va, bits);
+}
+
 void *virtual_base;
+uint32_t setbits, clrbits;	// set in set_sel and led_disp as side effects
+
 void set_sel(int sel) {
-	uint32_t setbits, clrbits;
 	// set sel for segment/key scan selection
 	if (sel >= 9) {
-		clrbits = SEL_UD;
+		clrbits |= SEL_UD;
 	} else if (sel == 8) {
-		clrbits = SEL_LD;
+		clrbits |= SEL_LD;
 	} else {
-		clrbits = SEL_138_EN | ((7 & (7 ^ sel)) << 24);		// mask & (1's compliments)
+		clrbits |= SEL_138_EN | ((7 & (7 ^ sel)) << 24);		// mask & (1's compliments)
 	}
-	setbits = SEL_MASK & (SEL_MASK ^ clrbits);
-	alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO1_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), setbits);
-	alt_clrbits_word( (virtual_base + ((uint32_t)( ALT_GPIO1_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), clrbits);
+	setbits |= SEL_MASK & (SEL_MASK ^ clrbits);
 }
 
 int led_seg[10];	// led_seg[10-6] = digit Upper[DP,3,2,1,0]	: segment with is lit
 void led_disp(int sel) {
 	// display LED segments at sel - 0 out to lit the segments: [D15,D14,..., D8] = [DP,G,...,(A/D1)]
 	int segments;
-	uint32_t setbits, clrbits;
 	segments = led_seg[sel] & 0xff;
-	clrbits = segments << 8;
-	setbits = (0xff ^ segments) << 8;
-	alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO1_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), setbits);
-	alt_clrbits_word( (virtual_base + ((uint32_t)( ALT_GPIO1_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), clrbits);
+	clrbits |= segments << 8;
+	setbits |= (0xff ^ segments) << 8;
+	// p_alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), setbits);
+	// p_alt_clrbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), clrbits);
 }
 
 unsigned char mem[65536];	// memory, zero initialized
@@ -130,7 +138,7 @@ int main(int argc, char **argv) {
 
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s <seg_num> <segbits (8bit hex)>\n", argv[0]);
-		exit(-1);
+		return (1);
 	}
 
 	digit = atoi(argv[1]);
@@ -160,12 +168,33 @@ int main(int argc, char **argv) {
 	alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DDR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), USER_IO_DIR );
 
 	printf("Displaying segments\n");
-	set_sel(digit);
+	setbits = clrbits = 0;
+	set_sel(digit);			// side effects in setbits and clearbits
 	led_seg[digit] = segs;
-	led_disp(digit);
+	led_disp(digit);		// side effects in setbits and clearbits
+	p_alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), setbits);
+	p_alt_clrbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), clrbits);
 	
+	scan_input = alt_read_word( (virtual_base + ((uint32_t)( ALT_GPIO0_EXT_PORTA_ADDR ) & (uint32_t)( HW_REGS_MASK ))) );		
+	if (scan_input & RSTIN_MASK) {
+		printf("Reset released\n");
+	} else {
+		printf("Reset pressed\n");
+	}
 	usleep(5 * 1000 * 1000);
-	exit(0);
+	if (scan_input & RSTIN_MASK) {
+		printf("Reset released\n");
+	} else {
+		printf("Reset pressed\n");
+	}
+	// clean up our memory mapping and exit
+	if( munmap( virtual_base, HW_REGS_SPAN ) != 0 ) {
+		printf( "ERROR: munmap() failed...\n" );
+		close( fd );
+		return( 1 );
+	}	
+	close( fd );
+	return (0);
 
 	printf("Scanning key and LEDs\n");
 	key_prev = key_on = 0;	
