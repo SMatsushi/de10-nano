@@ -2,10 +2,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include "hwlib.h"
-#include "socal/socal.h"
-#include "socal/hps.h"
-#include "socal/alt_gpio.h"
+#include "../../include/hwlib.h"
+#include "../../include/socal/socal.h"
+#include "../../include/socal/hps.h"
+#include "../../include/socal/alt_gpio.h"
 
 #define HW_REGS_BASE ( ALT_STM_OFST )
 #define HW_REGS_SPAN ( 0x04000000 )
@@ -21,6 +21,7 @@ int main(int argc, char **argv) {
 	int fd;
 	uint32_t  scan_input;
 	int i;		
+	int b_st, b_pre;
 	// map the address space for the LED registers into user space so we can interact with them.
 	// we'll actually map in the entire CSR span of the HPS since we want to access various registers within that span
 	if( ( fd = open( "/dev/mem", ( O_RDWR | O_SYNC ) ) ) == -1 ) {
@@ -49,12 +50,26 @@ int main(int argc, char **argv) {
 	}
 	printf("user key test \r\n");
 	printf("press key to control led\r\n");
+	
+	b_st = b_pre = 0;
 	while(1){
 		scan_input = alt_read_word( ( virtual_base + ( ( uint32_t )(  ALT_GPIO1_EXT_PORTA_ADDR ) & ( uint32_t )( HW_REGS_MASK ) ) ) );		
-		//usleep(1000*1000);		
-		if(~scan_input&BUTTON_MASK)
+		if( ~scan_input & BUTTON_MASK ) {
+			b_st = 1;
 			alt_setbits_word( ( virtual_base + ( ( uint32_t )( ALT_GPIO1_SWPORTA_DR_ADDR ) & ( uint32_t )( HW_REGS_MASK ) ) ), BIT_LED );
-		else    alt_clrbits_word( ( virtual_base + ( ( uint32_t )( ALT_GPIO1_SWPORTA_DR_ADDR ) & ( uint32_t )( HW_REGS_MASK ) ) ), BIT_LED );
+		} else {
+			b_st = 0;
+			alt_clrbits_word( ( virtual_base + ( ( uint32_t )( ALT_GPIO1_SWPORTA_DR_ADDR ) & ( uint32_t )( HW_REGS_MASK ) ) ), BIT_LED );
+		}
+		if ( b_st != b_pre ) {
+			if (b_st) {
+				printf("Button pressed\n");
+			} else {
+				printf("Button released\n");
+			}
+		}
+		usleep(100*1000);		
+		b_pre = b_st;
 	}	
 	// clean up our memory mapping and exit
 	if( munmap( virtual_base, HW_REGS_SPAN ) != 0 ) {
