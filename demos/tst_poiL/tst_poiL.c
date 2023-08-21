@@ -3,10 +3,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include "/home/matsushi/include/hwlib.h"
-#include "/home/matsushi/include/socal/socal.h"
-#include "/home/matsushi/include/socal/hps.h"
-#include "/home/matsushi/include/socal/alt_gpio.h"
+#include "../../include/hwlib.h"
+#include "../../include/socal/socal.h"
+#include "../../include/socal/hps.h"
+#include "../../include/socal/alt_gpio.h"
 
 #define HW_REGS_BASE ( ALT_STM_OFST )
 #define HW_REGS_SPAN ( 0x04000000 )
