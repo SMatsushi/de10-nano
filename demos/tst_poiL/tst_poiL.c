@@ -12,14 +12,18 @@
 #define HW_REGS_SPAN ( 0x04000000 )
 #define HW_REGS_MASK ( HW_REGS_SPAN - 1 )
 
-#define USER_IO_DIR     (0x0fc0ff00)	//  Out=GPIO[27:22]=sel[C,B,A, UD,LD], GPIO[15:8]=Seg;   IN=GPIO[3:0];
-#define SEL_MASK		(0x0fc00000)
-#define SEL_LD			(0x00400000)
-#define SEL_UD			(0x00800000)
-#define SEL_138_A		(0x01000000)
-#define SEL_138_B		(0x02000000)
-#define SEL_138_C		(0x04000000)
-#define SEL_138_EN		(0x08000000)
+#define USER_IO_DIR     (0x003fff00)	//  Out=GPIO[27:22]=sel[C,B,A, UD,LD], GPIO[15:8]=Seg;   IN=GPIO[3:0];
+#define SEL_MASK		(0x003f0000)
+#define SEL_UD			(0x00200000)	// GPIO0[21]
+#define SEL_LD			(0x00100000)	// GPIO0[20]
+#define SEL_138_EN		(0x00080000)	// GPIO0[19]
+#define SEL_138_C		(0x00040000)	// GPIO0[18:16]: 3bit binary code to SN74HC138 
+#define SEL_138_B		(0x00020000)
+#define SEL_138_A		(0x00010000)
+#define SEL_138_MASK	(0x00070000)
+#define SEL_138_SFT		(16)			// left shift 16 bits to rw GPIO0 reg
+#define SEG_MASK		(0x0000ff00)	// GPIO0[15-8]: segment drive bits
+#define SEG_SFT			(8)				// left shift 8 bits to rw GPIO0 reg
 
 #define RSTIN_MASK      (0x00000008)
 #define KEYIN_MASK      (0x00000007)
@@ -50,7 +54,8 @@ void set_sel(int sel) {
 	} else if (sel == 8) {
 		clrbits |= SEL_LD;
 	} else {
-		clrbits |= SEL_138_EN | ((7 & (7 ^ sel)) << 24);		// mask & (1's compliments)
+		clrbits |= SEL_138_EN;
+		clrbits |= ((sel << SEL_138_SFT) ^ SEL_138_MASK) & SEL_138_MASK;		// mask & (1's compliments)
 	}
 	setbits |= SEL_MASK & (SEL_MASK ^ clrbits);
 }
@@ -59,9 +64,9 @@ int led_seg[10];	// led_seg[10-6] = digit Upper[DP,3,2,1,0]	: segment with is li
 void led_disp(int sel) {
 	// display LED segments at sel - 0 out to lit the segments: [D15,D14,..., D8] = [DP,G,...,(A/D1)]
 	int segments;
-	segments = led_seg[sel] & 0xff;
-	clrbits |= segments << 8;
-	setbits |= (0xff ^ segments) << 8;
+	segments = led_seg[sel];
+	clrbits |= (segments << SEG_SFT) & SEG_MASK;
+	setbits |= ((segments << SEG_SFT) ^ SEG_MASK) & SEG_MASK;
 	// p_alt_setbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), setbits);
 	// p_alt_clrbits_word( (virtual_base + ((uint32_t)( ALT_GPIO0_SWPORTA_DR_ADDR ) & (uint32_t)( HW_REGS_MASK ))), clrbits);
 }
@@ -77,13 +82,17 @@ unsigned char seg_tbl[20] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7c, 0x07,
                              // 0,    1,    2,    3,    4,    5,    6,    7, 
                              0x7f, 0x67, 0x77, 0x7c, 0x58, 0x5e, 0x79, 0x71, 0x80};	// segments for 0, ... 9, DP
                              // 8,    9,    A,    b,    c,    d,    e,    f,   DP
+#define LEDDIGS  4			// 4 digits in each LED module
+#define LEDDRIVS 5			// 5 drives including DP in each LED module
+#define UPPER 1
+#define LOWER 0
 
 void set_ledseg(int data, int ena, int upper) {
 	// set four led segment refering 16 bit data and 4bit ena, if upper=1 set upper 4 digits 
 	int i, d, ofs; 
-	ofs = upper ? 5 : 0;
+	ofs = upper ? LEDDRIVS : 0;
 	// set segments for lower 4 digits enabled by 1 in ena[3:0]
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < LEDDIGS; i++) {
 		if (ena & 1) {
 			d = data & 0x0f;
 			led_seg[i + ofs] = seg_tbl[d];	// digit 0 to F
@@ -91,15 +100,15 @@ void set_ledseg(int data, int ena, int upper) {
 			led_seg[i + ofs] = seg_tbl[0x10];	// DP
 		}
 		ena >>= 1;
-		data >>= 4;
+		data >>= 4;		// next 4 bits (hex)
 	}
 }
 
 void rd_mem(int maddr) {
 	unsigned char md;
 	md = mem[maddr];
-	set_ledseg(maddr, 0xf, 1);
-	set_ledseg(md, 3, 0);
+	set_ledseg(maddr, 0xf, UPPER);	// display 4 digits for address
+	set_ledseg(md, 3, LOWER);		// use lower 2 digits for data
 }
 
 void exec_cmd(int cmd) {
@@ -231,9 +240,9 @@ int main(int argc, char **argv) {
 						mdata = mden = 0;
 					} else {
 						i += (key_val & UPN_MASK) ? 8 : 0;	// get tenkey value
-						mdata = (mdata << 4) | i;
-						mden = (mden << 1) | 1;
-						set_ledseg(mdata, mden, 0);		// lower 4 digits
+						mdata = ((mdata << 4) | i) & 0xffff;
+						mden = ((mden << 1) | 1) & 0x0f;
+						set_ledseg(mdata, mden, LOWER);		// lower 4 digits
 					}
 				key_stbp = key_stb;
 			}
